@@ -16,10 +16,12 @@ using System.Windows.Input;
 using System.Windows.Media.Imaging;
 using System.Windows.Navigation;
 using System.Windows.Shapes;
+using System.Runtime.InteropServices;
 
 namespace CompilePalX.Compiling
 {
     internal delegate Run? LogWrite(string s, Brush b);
+    internal delegate Run? LogWriteURL(string s, string url);
     internal delegate void LogBacktrack(List<Run> l);
     internal delegate void CompileErrorLogWrite(string errorText, Error e);
 
@@ -32,10 +34,14 @@ namespace CompilePalX.Compiling
         static CompilePalLogger()
         {
             File.Delete(logFile);
-            Thread.CurrentThread.CurrentUICulture = CultureInfo.InvariantCulture;
-            Thread.CurrentThread.CurrentCulture = CultureInfo.InvariantCulture;
+
+            // print debug information
+            LogLine($"--- Compile Pal {UpdateManager.CurrentVersion} ---");
+            LogLine($"Runtime: {RuntimeInformation.RuntimeIdentifier}");
+            LogLine($"Locale: {CultureInfo.CurrentCulture.Name}");
         }
         public static event LogWrite OnWrite;
+        public static event LogWriteURL OnWriteURL;
         public static event LogBacktrack OnBacktrack;
         public static event CompileErrorLogWrite OnErrorLog;
 
@@ -85,6 +91,11 @@ namespace CompilePalX.Compiling
             return Log(s + Environment.NewLine, formatStrings);
         }
 
+        public static Run? LogLineFileLocation(string s, string url)
+        {
+            return OnWriteURL.Invoke(s + Environment.NewLine, url);
+        }
+
         public static void LogDebug(string s)
         {
             // log in debug, no op in release
@@ -118,11 +129,15 @@ namespace CompilePalX.Compiling
             File.AppendAllText(logFile, errorText);
             OnErrorFound(e);
         }
+        public static void LogLineCompileError(string errorText, Error e)
+        {
+            LogCompileError(errorText + Environment.NewLine, e);
+        }
 
-        private static Dictionary<Error, int> errorsFound = new ();
+        private static Dictionary<Error, int> errorsFound = [];
 
         private static StringBuilder lineBuffer = new ();
-        private static List<Run> tempText = new ();
+        private static List<Run> tempText = [];
         public static void LogProgressive(string s)
         {
             lineBuffer.Append(s);
@@ -135,7 +150,7 @@ namespace CompilePalX.Compiling
             }
 
             // Log has completed at least 1 line, process it further
-            List<string> lines = lineBuffer.ToString().Split('\n').ToList();
+            List<string> lines = lineBuffer.ToString().Split("\r\n").ToList();
 
             string suffixText = lines.Last();
 
@@ -149,16 +164,16 @@ namespace CompilePalX.Compiling
                 Error? error = ErrorFinder.GetError(line);
 
                 if (error == null)
-                    Log(line);
+                    LogLine(line);
                 else
-                    LogCompileError(line, error);
+                    LogLineCompileError(line, error);
             }
 
             if (suffixText.Length > 0)
             {
                 Run? log = Log(suffixText);
                 if (log != null)
-                    tempText = new List<Run> { log };
+                    tempText = [log];
             }
         }
     }

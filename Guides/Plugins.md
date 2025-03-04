@@ -6,7 +6,7 @@ Plugins are currently in a beta state, so the format and structure are subject t
 ![image](https://user-images.githubusercontent.com/15372675/218288001-2154a3fa-201c-4f18-ad0f-36959aed9108.png)
 
 ## Installation
-Plugins can be installed by copying the plugin folder into the Compile Pal/Parameters folder.
+Plugins can be installed by copying the plugin folder into the Compile Pal/Plugins folder.
 
 ***USE PLUGINS AT YOUR OWN RISK, DO NOT INSTALL PLUGINS FROM UNTRUSTED SOURCES***
 
@@ -35,7 +35,8 @@ My Plugin/
   "SupportsBSP": "bool",
   "CheckExitCode": "bool",
   "CompatibleGames": "int[]",
-  "IncompatibleGames": "int[]"
+  "IncompatibleGames": "int[]",
+  "WorkingDirectory": "string"
 }
 ```
 | Field | Description |
@@ -43,7 +44,7 @@ My Plugin/
 | Name    | Plugin Name. Must match the folder name.
 | Description | Description shown in the process adder dialog.
 | Warning | Warning shown in the process adder dialog.
-| Path    | Path to a program, relative to the Compile Pal folder. Can be templated, see [Variable Substitution](#Variable-Substitution). (For versions <=v27.28, this is relative to the Compile Pal/CompileLogs folder)
+| Path    | Path to a program, relative to the working directory (by default the Compile Pal folder). Can be templated, see [Variable Substitution](#Variable-Substitution). (For versions <=v27.28, this is relative to the Compile Pal/CompileLogs folder)
 | Arguments | The first arguments passed to the program. Can be templated, see [Variable Substitution](#Variable-Substitution). (>=v27.28)
 | BasisString | The last arguments passed to the program. Can be templated, see [Variable Substitution](#Variable-Substitution). Order of arguments is `Arguments` → `Arguments selected by user` → `BasisString`.
 | Order   | Determines when your step should run. For example, an Order of 1.5 would run between VBSP and VVIS. For the complete ordering, look at the existing compile steps in the `Parameters` folder.
@@ -53,6 +54,7 @@ My Plugin/
 | CheckExitCode | Checks for process exit code and raises a warning when it is not 0. Defaults to `true`. (>=v27.31)
 | CompatibleGames | Whitelist of Steam App IDs for games that this plugin is compatible with. Will override IncompatibleGames if both are set. (>=v27.29)
 | IncompatibleGames | Blacklist of Steam App IDs for games that this plugin is not compatible with. (>=v27.29)
+| WorkingDirectory | Working Directory of the plugin. Defaults to the Compile Pal folder. Can be templated, see [Variable Substitution](#Variable-Substitution). (>=v28.4)
 
 ### Variable Substitution
 | Variable | Description |
@@ -132,7 +134,7 @@ For examples, download [PLUGIN DEMO.zip](https://github.com/ruarai/CompilePal/fi
 
 
 ### Packaging An Application
-It is recomended to package your application inside the plugin folder to make it easier to point to. For example, `Path` can be set to `Parameters\\My Plugin\\plugin.exe`.
+It is recomended to package your application inside the plugin folder to make it easier to point to. For example, `Path` can be set to `Plugins\\My Plugin\\plugin.exe`.
 
 ### Python Plugins
 Setting the `Path` to `python` or `python3` is not portable. Use the [Python Launcher](https://docs.python.org/3/using/windows.html#python-launcher-for-windows) `py` (requires Python >= 3.3), passing the python version in the `Arguments`, Ex.
@@ -145,3 +147,29 @@ Setting the `Path` to `python` or `python3` is not portable. Use the [Python Lau
 
 ## Debugging Plugins
 You can view the program path and arguments in the `debug.log` found in the Compile Pal folder.
+
+## Game Plugin Autodiscovery
+Source Engine games that ship with additional compilers can also distribute Compile Pal plugin definitions, which can be automatically picked up. 
+All thats needed is a `CompilePal` section in the `GameConfig.txt` with a `Plugins` key/value pointing to a folder containing Compile Pal plugins.
+
+ex.
+GameConfig.txt
+```json
+"Configs"
+{
+	"Games"
+	{
+		"Team Fortress 2"
+		{
+			"CompilePal"
+			{
+				"Plugins"		"C:\Program Files (x86)\Steam\steamapps\common\Team Fortress 2\bin\Plugins"
+			}
+			...
+		}
+	}
+}
+
+```
+
+

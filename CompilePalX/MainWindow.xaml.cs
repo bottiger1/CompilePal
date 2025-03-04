@@ -31,6 +31,7 @@ using System.Windows.Media.TextFormatting;
 using CompilePalX.Compilers;
 using CompilePalX.Configuration;
 using Path = System.IO.Path;
+using System.Runtime.InteropServices;
 
 namespace CompilePalX
 {
@@ -40,7 +41,7 @@ namespace CompilePalX
     public partial class MainWindow
     {
         public static Dispatcher ActiveDispatcher;
-        private ObservableCollection<CompileProcess> CompileProcessesSubList = new ObservableCollection<CompileProcess>();
+        private ObservableCollection<CompileProcess> CompileProcessesSubList = [];
 	    private bool processModeEnabled;
 
         public bool PresetFilterEnabled { get; set; } = true;
@@ -70,6 +71,7 @@ namespace CompilePalX
             CompilePalLogger.OnWrite += Logger_OnWrite;
             CompilePalLogger.OnBacktrack += Logger_OnBacktrack;
             CompilePalLogger.OnErrorLog += CompilePalLogger_OnError;
+            CompilePalLogger.OnWriteURL += CompilePalLogger_OnWriteFileLocation;
 
             UpdateManager.OnUpdateFound += UpdateManager_OnUpdateFound;
             UpdateManager.CheckVersion();
@@ -79,6 +81,7 @@ namespace CompilePalX
             ErrorFinder.Init();
 
             ConfigurationManager.AssembleParameters();
+            ConfigurationManager.LoadSettings();
 
             ProgressManager.TitleChange += ProgressManager_TitleChange;
             ProgressManager.ProgressChange += ProgressManager_ProgressChange;
@@ -104,20 +107,33 @@ namespace CompilePalX
 			RowDragHelper.RowSwitched += RowDragHelperOnRowSwitched;
 
             elapsedTimeDispatcherTimer = new DispatcherTimer(new TimeSpan(0, 0, 0, 1), DispatcherPriority.Background,
-                this.TickElapsedTimer, Dispatcher.CurrentDispatcher)
+                TickElapsedTimer, Dispatcher.CurrentDispatcher)
             {
                 IsEnabled = false
             };
 
             HandleArgs();
+
+
+            // check to see if running on unsupported platform
+            if (!OperatingSystem.IsWindowsVersionAtLeast(10))
+            {
+                UnsupportedPlatformButton.Visibility = Visibility.Visible;
+                // show unsupported message on startup only once
+                if (!Convert.ToBoolean(RegistryManager.Read<string>("UnsupportedDialogShown")))
+                {
+                    ShowUnsupportedModal();
+                    RegistryManager.Write("UnsupportedDialogShown", true);
+                }
+            }
         }
 
-		public Task<MessageDialogResult> ShowModal(string title, string message, MessageDialogStyle style = MessageDialogStyle.Affirmative, MetroDialogSettings settings = null)
+        public Task<MessageDialogResult> ShowModal(string title, string message, MessageDialogStyle style = MessageDialogStyle.Affirmative, MetroDialogSettings settings = null)
 		{
-			return this.Dispatcher.Invoke(() => this.ShowMessageAsync(title, message, style, settings));
+			return Dispatcher.Invoke(() => this.ShowMessageAsync(title, message, style, settings));
 		}
 
-	    private void HandleArgs(bool ignoreWipeArg = false)
+	    private static void HandleArgs(bool ignoreWipeArg = false)
         {
             //Handle command line args
             string[] commandLineArgs = Environment.GetCommandLineArgs();
@@ -154,7 +170,7 @@ namespace CompilePalX
                     }
 
                 }
-                catch (ArgumentOutOfRangeException e)
+                catch (ArgumentOutOfRangeException)
                 {
                     //Ignore error
                 }
@@ -167,9 +183,10 @@ namespace CompilePalX
             {
                 Hyperlink errorLink = new Hyperlink();
 
-                Run text = new Run(errorText);
-
-                text.Foreground = e.ErrorColor;
+                Run text = new Run(errorText)
+                {
+                    Foreground = e.ErrorColor
+                };
 
                 errorLink.Inlines.Add(text);
                 if (e.ID >= 0)
@@ -185,7 +202,7 @@ namespace CompilePalX
                     PenThicknessUnit = TextDecorationUnit.FontRecommended
                 };
 
-                errorLink.TextDecorations = new TextDecorationCollection(new[] { underline });
+                errorLink.TextDecorations = new TextDecorationCollection([underline]);
 
                 OutputParagraph.Inlines.Add(errorLink);
                 CompileOutputTextbox.ScrollToEnd();
@@ -235,7 +252,41 @@ namespace CompilePalX
             });
         }
 
-        async void UpdateManager_OnUpdateFound()
+        private Run? CompilePalLogger_OnWriteFileLocation(string s, string url)
+        {
+            return Dispatcher.Invoke(() =>
+            {
+                if (string.IsNullOrEmpty(s))
+                    return null;
+
+                Hyperlink link = new Hyperlink
+                {
+                    NavigateUri = new Uri(url)
+                };
+                link.RequestNavigate += Link_RequestNavigate;
+
+                Run textRun = new Run(s)
+                {
+                    Foreground = FindResource("CompilePal.Brushes.Link") as Brush
+                };
+                link.Inlines.Add(textRun);
+
+                OutputParagraph.Inlines.Add(link);
+
+                // scroll to end only if already scrolled to the bottom. 1.0 is an epsilon value for double comparison
+                if (CompileOutputTextbox.VerticalOffset + CompileOutputTextbox.ViewportHeight >= CompileOutputTextbox.ExtentHeight - 1.0)
+                    CompileOutputTextbox.ScrollToEnd();
+
+                return textRun;
+            });
+        }
+
+        private void Link_RequestNavigate(object sender, RequestNavigateEventArgs e)
+        {
+            Process.Start("explorer", $"/select, \"{e.Uri}\"");
+        }
+
+        void UpdateManager_OnUpdateFound()
         {
             UpdateHyperLink.Inlines.Add(
 	            $"An update is available. Current version is {UpdateManager.CurrentVersion}, latest version is {UpdateManager.LatestVersion}.");
@@ -251,7 +302,7 @@ namespace CompilePalX
 
         Map? GetCurrentMap()
         {
-            return this.MapListBox.SelectedItem as Map;
+            return MapListBox.SelectedItem as Map;
         }
 
         void SetSources()
@@ -299,11 +350,16 @@ namespace CompilePalX
 			//BindingOperations.EnableCollectionSynchronization(CurrentOrder, lockObj);
 		}
 
-        public void RefreshSources()
+        public void LoadGameConfiguration(GameConfiguration gameConfiguration)
         {
+            Title = $"Compile Pal {UpdateManager.CurrentVersion}X {gameConfiguration.Name}";
+
             PresetConfigListBox.Items.Refresh();
             ConfigDataGrid.Items.Refresh();
             CompileProcessesListBox.Items.Refresh();
+
+            // reload parameters incase new game config has a plugin folder
+            ConfigurationManager.AssembleParameters();
         }
 
         void ProgressManager_ProgressChange(double progress)
@@ -455,11 +511,11 @@ namespace CompilePalX
 
             if (c.ProcessDataGrid.SelectedItem != null)
             {
-                CompileProcess ChosenProcess = (CompileProcess)c.ProcessDataGrid.SelectedItem;
-                ChosenProcess.Metadata.DoRun = true;
-                if (!ChosenProcess.PresetDictionary.ContainsKey(ConfigurationManager.CurrentPreset))
+                CompileProcess chosenProcess = (CompileProcess)c.ProcessDataGrid.SelectedItem;
+                chosenProcess.Metadata.DoRun = true;
+                if (!chosenProcess.PresetDictionary.ContainsKey(ConfigurationManager.CurrentPreset))
                 {
-                    ChosenProcess.PresetDictionary.Add(ConfigurationManager.CurrentPreset, new ObservableCollection<ConfigItem>());
+                    chosenProcess.PresetDictionary.Add(ConfigurationManager.CurrentPreset, []);
                 }
             }
 
@@ -843,7 +899,7 @@ namespace CompilePalX
             ConfigDataGrid.ItemsSource = null;
 
             // no maps selected, default to last selected index. When we update any bound item in the MapBox datasource it will deselect all items, this reselects it after it has been deselected
-            if (!(MapListBox.SelectedItem is Map selectedMap))
+            if (MapListBox.SelectedItem is not Map selectedMap)
             {
                 // a map got deleted, make sure selected map index is valid
                 if (MapListBox.Items.Count - 1 < SelectedMapIndex)
@@ -881,20 +937,20 @@ namespace CompilePalX
 	    private void DataGridCell_OnEnter(object sender, MouseEventArgs e)
 	    {
 			//Only show drag cursor if row is draggable
-		    if ((sender as DataGridRow)?.Item is CompileProcess process && process.IsDraggable)
+		    if (sender is DataGridRow { Item: CompileProcess process } && process.IsDraggable)
 			    Cursor = Cursors.SizeAll;
 	    }
 
 	    private void DataGridCell_OnExit(object sender, MouseEventArgs e)
 	    {
-		    if ((sender as DataGridRow)?.Item is CompileProcess process && process.IsDraggable)
+		    if (sender is DataGridRow { Item: CompileProcess process } && process.IsDraggable)
 			    Cursor = Cursors.Arrow;
 	    }
 
 	    public void UpdateOrderGridSource<T>(ObservableCollection<T> newSrc)
 	    {
 			//Use dispatcher so this can be called from seperate thread
-			this.Dispatcher.Invoke(() =>
+			Dispatcher.Invoke(() =>
 			{
 				//TODO order grid doesnt seem to want to update, so have to do it manually by resetting the source
 				//Update ordergrid by resetting collection
@@ -931,6 +987,9 @@ namespace CompilePalX
 		//Search through ProcDataGrid to find corresponding ConfigItem
 		private ConfigItem? GetConfigFromCustomProgram(CustomProgram program)
 	    {
+            if (ProcessDataGrid.ItemsSource is null)
+                return null;
+
 			foreach (var procSourceItem in ProcessDataGrid.ItemsSource)
 			{
 				if (program.Equals(procSourceItem))
@@ -966,6 +1025,15 @@ namespace CompilePalX
         {
 			Process.Start(new ProcessStartInfo("https://github.com/ruarai/CompilePal/issues/") { UseShellExecute = true });
             e.Handled = true;
+        }
+
+        private void ShowUnsupportedModal()
+        {
+            ShowModal("Unsupported Platform", $"{RuntimeInformation.OSDescription} is no longer officially supported\nSome features may not work as exepcted\n\nKnown Issues:\nUnable to automatically check for updates");
+        }
+        private void UnsupportedPlatformButton_OnClick(object sender, RoutedEventArgs e)
+        {
+            ShowUnsupportedModal();
         }
 
         private void TickElapsedTimer(object sender, EventArgs e)
@@ -1004,9 +1072,51 @@ namespace CompilePalX
                 SetSources();
             }
         }
+
+        private void SettingsButton_Click(object sender, RoutedEventArgs e)
+        {
+            new SettingsWindow().Show();
+        }
+
+        protected override void OnSourceInitialized(EventArgs e)
+        {
+            // load settings on window opening
+            try
+            {
+                var converter = new GridLengthConverter();
+                if (ConfigurationManager.Settings.MapListHeight is not null)
+                    this.MapListBoxRow.Height = (GridLength)converter.ConvertFromString(ConfigurationManager.Settings.MapListHeight);
+            }
+            catch (Exception ex)
+            {
+                // fail silently, worst case scenario is we use the default height of the list box
+                CompilePalLogger.LogLineDebug($"Failed to load settings on startup: {ex}");
+            }
+
+            base.OnSourceInitialized(e);
+        }
+
+        protected override void OnClosing(CancelEventArgs e)
+        {
+            // save size of map list box on window closing
+            try
+            {
+                var converter = new GridLengthConverter();
+                ConfigurationManager.Settings.MapListHeight = converter.ConvertToString(this.MapListBoxRow.Height);
+
+                ConfigurationManager.SaveSettings();
+            }
+            catch (Exception ex)
+            {
+                // fail silently, worst case scenario is the height of the list box doesnt save
+                CompilePalLogger.LogLineDebug($"Failed while saving settings on shutdown: {ex}");
+            }
+            base.OnClosing(e);
+        }
+
     }
 
-	public static class ObservableCollectionExtension
+    public static class ObservableCollectionExtension
 	{
 		public static ObservableCollection<T> AddRange<T>(this ObservableCollection<T> collection, IEnumerable<T> range)
 		{

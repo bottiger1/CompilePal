@@ -67,7 +67,6 @@ namespace CompilePalX
             {
                 CompilePalLogger.LogLine("Fetching update information...");
 
-                ServicePointManager.SecurityProtocol = SecurityProtocolType.Tls12;
                 var c = new HttpClient();
                 var version = c.GetStringAsync(new Uri(isPrerelease ? LatestPrereleaseVersionURL : LatestVersionURL));
                 string newVersion = GetValidVersionString(await version);

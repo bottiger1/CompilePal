@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -12,6 +13,7 @@ using CompilePalX.Compilers;
 using CompilePalX.Compilers.BSPPack;
 using CompilePalX.Compilers.UtilityProcess;
 using CompilePalX.Compiling;
+using CompilePalX.Configuration;
 using Newtonsoft.Json;
 
 namespace CompilePalX
@@ -60,13 +62,16 @@ namespace CompilePalX
 
     static class ConfigurationManager
     {
-        public static ObservableCollection<CompileProcess> CompileProcesses = new ObservableCollection<CompileProcess>();
-        public static ObservableCollection<Preset> KnownPresets = new();
+        public static ObservableCollection<CompileProcess> CompileProcesses = [];
+        public static ObservableCollection<Preset> KnownPresets = [];
+        public static Settings Settings = new Settings();
 
         public static Preset? CurrentPreset = null;
 
         private static readonly string ParametersFolder = "./Parameters";
         private static readonly string PresetsFolder = "./Presets";
+        private static readonly string PluginFolder = "./Plugins";
+        private static readonly string SettingsFile = "./Settings.json";
         
 
         public static void AssembleParameters()
@@ -81,8 +86,14 @@ namespace CompilePalX
 			CompileProcesses.Add(new CustomProcess());
 
             //collect new metadatas
+            var metadatas = Directory.GetDirectories(ParametersFolder).Concat(Directory.GetDirectories(PluginFolder)).ToArray();
 
-            var metadatas = Directory.GetDirectories(ParametersFolder);
+            // load autodiscovered plugins
+            if (GameConfigurationManager.GameConfiguration is not null && GameConfigurationManager.GameConfiguration.PluginFolder is not null)
+            {
+                CompilePalLogger.LogLineDebug($"Loading additional plugins from: {GameConfigurationManager.GameConfiguration.PluginFolder}");
+                metadatas = metadatas.Concat(Directory.GetDirectories(GameConfigurationManager.GameConfiguration.PluginFolder)).ToArray();
+            }
 
             foreach (var metadata in metadatas)
             {
@@ -91,9 +102,21 @@ namespace CompilePalX
                 if (CompileProcesses.Any(c => String.Equals(c.Metadata.Name, folderName, StringComparison.CurrentCultureIgnoreCase)))
                     continue;
 
-                var compileProcess = new CompileExecutable(folderName);
+                string? parameterFolder = null;
+                if (!String.Equals(Path.GetDirectoryName(metadata), ParametersFolder, StringComparison.CurrentCultureIgnoreCase))
+                {
+                    parameterFolder = Path.GetDirectoryName(metadata);
+                }
 
-                CompileProcesses.Add(compileProcess);
+                try
+                {
+                    var compileProcess = new CompileExecutable(folderName, parameterFolder);
+                    CompileProcesses.Add(compileProcess);
+                }
+                catch (Exception ex)
+                {
+                    CompilePalLogger.LogLine($"Failed to load Compile Process: {metadata}, {ex}");
+                }
             }
 
             //collect legacy metadatas
@@ -106,12 +129,16 @@ namespace CompilePalX
                 if (CompileProcesses.Any(c => String.Equals(c.Metadata.Name, name, StringComparison.CurrentCultureIgnoreCase)))
                     continue;
 
-                var compileProcess = new CompileExecutable(name);
-
-                CompileProcesses.Add(compileProcess);
+                try
+                {
+                    var compileProcess = new CompileExecutable(name);
+                    CompileProcesses.Add(compileProcess);
+                }
+                catch (Exception ex)
+                {
+                    CompilePalLogger.LogLine($"Failed to load Compile Process: {metadata}, {ex}");
+                }
             }
-
-
 
             CompileProcesses = new ObservableCollection<CompileProcess>(CompileProcesses.OrderBy(c => c.Metadata.Order));
 
@@ -153,7 +180,7 @@ namespace CompilePalX
                     string file = Path.Combine(presetPath, process.PresetFile);
                     if (File.Exists(file))
                     {
-                        process.PresetDictionary.Add(preset, new ObservableCollection<ConfigItem>());
+                        process.PresetDictionary.Add(preset, []);
                         //read the list of preset parameters
                         var lines = File.ReadAllLines(file);
 
@@ -188,6 +215,24 @@ namespace CompilePalX
                 KnownPresets.Add(preset);
 
             }
+        }
+
+        public static void LoadSettings()
+        {
+            if (!File.Exists(SettingsFile))
+            {
+                CompilePalLogger.LogLine("No settings file found, falling back to default");
+                return;
+            }
+
+            var settings = JsonConvert.DeserializeObject<Settings>(File.ReadAllText(SettingsFile));
+            if (settings is null)
+            {
+                CompilePalLogger.LogLine("Failed to load settings, falling back to default");
+                return;
+            }
+
+            Settings = settings;
         }
 
         public static void SavePresets()
@@ -225,10 +270,20 @@ namespace CompilePalX
         {
             foreach (var process in CompileProcesses)
             {
-                string jsonMetadata = Path.Combine("./Parameters", process.Metadata.Name, "meta.json");
-
+                string jsonMetadata = Path.Combine(process.ParameterFolder, process.Metadata.Name, "meta.json");
                 File.WriteAllText(jsonMetadata, JsonConvert.SerializeObject(process.Metadata, Formatting.Indented));
             }
+        }
+
+        public static void SaveSettings(Settings settings)
+        {
+            File.WriteAllText(SettingsFile, JsonConvert.SerializeObject(settings, Formatting.Indented));
+            Settings = settings;
+            ErrorFinder.Init(true);
+        }
+        public static void SaveSettings()
+        {
+            SaveSettings(Settings);
         }
 
         public static Preset NewPreset(Preset preset)
@@ -332,11 +387,16 @@ namespace CompilePalX
         }
 
 
-        public static ObservableCollection<ConfigItem> GetParameters(string processName, bool doRun = false)
+        public static ObservableCollection<ConfigItem> GetParameters(string processName, bool doRun = false, string? parameterFolder = null)
         {
             var list = new ObservableCollection<ConfigItem>();
 
-            string jsonParameters = Path.Combine(ParametersFolder, processName, "parameters.json");
+            if ( parameterFolder is null)
+            {
+                parameterFolder = ParametersFolder;
+            }
+
+            string jsonParameters = Path.Combine(parameterFolder, processName, "parameters.json");
 
             if (File.Exists(jsonParameters))
             {
@@ -360,7 +420,7 @@ namespace CompilePalX
             }
             else
             {
-                string csvParameters = Path.Combine(ParametersFolder, processName + ".csv");
+                string csvParameters = Path.Combine(parameterFolder, processName + ".csv");
 
                 if (File.Exists(csvParameters))
                 {
@@ -393,7 +453,8 @@ namespace CompilePalX
         {
             var item = new ConfigItem();
 
-            var pieces = line.Split(',');
+            // Split on commas unless they are escaped with a backslash
+            var pieces = Regex.Split(line, "(?<!\\\\),");
 
             if (pieces.Any())
             {
@@ -404,10 +465,10 @@ namespace CompilePalX
                     item.Parameter = pieces[0];
 
                 if (pieces.Count() >= 2)
-                    item.Value = pieces[1];
+                    item.Value = pieces[1].Replace("\\,", ",");
 				//Handle extra information stored for custom programs
 	            if (pieces.Count() >= 3)
-		            item.Value2 = pieces[2];
+		            item.Value2 = pieces[2].Replace("\\,", ",");
 	            if (pieces.Length >= 4)
 		            item.ReadOutput = Convert.ToBoolean(pieces[3]);
 	            if (pieces.Length >= 5)
@@ -420,12 +481,12 @@ namespace CompilePalX
 
 		private static string WritePresetLine(ConfigItem item)
         {
-			//Handle extra information stored for custom programs
+			// Handle extra information stored for custom programs
 	        if (item.Name == "Run Program")
-		        return $"{item.Parameter},{item.Value},{item.Value2},{item.ReadOutput},{item.WaitForExit},{item.Warning}";
+		        return $"{item.Parameter},{item.Value.Replace(",", "\\,")},{item.Value2.Replace(",", "\\,")},{item.ReadOutput},{item.WaitForExit},{item.Warning}";
             else if (item.Name == "Command Line Argument") // Command line arguments have no parameter value
-                return $"{item.Name},{item.Value}";
-            return $"{item.Parameter},{item.Value}";
+                return $"{item.Name},{item.Value.Replace(",", "\\,")}";
+            return $"{item.Parameter},{item.Value?.Replace(",", "\\,")}";
         }
 
         private static ConfigItem ParseBaseLine(string line)

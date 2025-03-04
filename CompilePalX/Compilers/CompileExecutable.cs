@@ -11,20 +11,11 @@ using CompilePalX.Compiling;
 
 namespace CompilePalX.Compilers
 {
-    class CompileExecutable : CompileProcess
+    class CompileExecutable(string metadata, string? parameterFolder = null) : CompileProcess(metadata, parameterFolder)
     {
-        public CompileExecutable(string metadata)
-            : base(metadata)
-        {
-            if (!Directory.Exists(runningDirectory))
-                Directory.CreateDirectory(runningDirectory);
-        }
-
-        private static string runningDirectory = ".";
-
         public override void Run(CompileContext c, CancellationToken cancellationToken)
         {
-            CompileErrors = new List<Error>();
+            CompileErrors = [];
 
             if (!CanRun(c)) return;
 
@@ -54,9 +45,16 @@ namespace CompilePalX.Compilers
 
             var args = GameConfigurationManager.SubstituteValues(GetParameterString(), c.MapFile);
 
+            bool normalPriority = false;
+            if (args.Contains("-normal_priority"))
+            {
+                args = args.Replace("-normal_priority", string.Empty);
+                normalPriority = true;
+            }
+
             Process.StartInfo.FileName = GameConfigurationManager.SubstituteValues(Metadata.Path);
             Process.StartInfo.Arguments = string.Join(" ", args);
-            Process.StartInfo.WorkingDirectory = runningDirectory;
+            Process.StartInfo.WorkingDirectory = Metadata.WorkingDirectory != null ? GameConfigurationManager.SubstituteValues(Metadata.WorkingDirectory, quote: false) : ".";
 
             CompilePalLogger.LogLineDebug($"Running '{Process.StartInfo.FileName}' with args '{Process.StartInfo.Arguments}'");
 
@@ -64,7 +62,7 @@ namespace CompilePalX.Compilers
             {
                 if (cancellationToken.IsCancellationRequested)
                 {
-                    CompilePalLogger.LogDebug($"Cancelled {this.Metadata.Name}");
+                    CompilePalLogger.LogDebug($"Cancelled {Metadata.Name}");
                     return;
                 }
                 Process.Start();
@@ -75,7 +73,14 @@ namespace CompilePalX.Compilers
                 CompilePalLogger.LogCompileError($"Failed to run executable: {Process.StartInfo.FileName}\n", new Error($"Failed to run executable: {Process.StartInfo.FileName}", ErrorSeverity.FatalError));
                 return;
             }
-            Process.PriorityClass = ProcessPriorityClass.BelowNormal;
+
+            if (normalPriority)
+            {
+                Process.PriorityClass = ProcessPriorityClass.Normal;
+                CompilePalLogger.LogLine($"Running {Name} with normal priority");
+            }
+            else 
+                Process.PriorityClass = ProcessPriorityClass.BelowNormal;
 
             if (Metadata.ReadOutput)
             { 
@@ -98,7 +103,7 @@ namespace CompilePalX.Compilers
                 if (read == null)
                     read = Process.StandardOutput.ReadAsync(buffer, 0, buffer.Length);
 
-                read.Wait(100); // an arbitrary timeout
+                read.Wait(100, cancellationToken); // an arbitrary timeout
 
                 if (read.IsCompleted)
                 {

@@ -26,7 +26,7 @@ namespace CompilePalX.Compilers
 
         public override void Run(CompileContext context, CancellationToken cancellationToken)
         {
-            CompileErrors = new List<Error>();
+            CompileErrors = [];
 
             if (!CanRun(context)) return;
 
@@ -140,6 +140,7 @@ namespace CompilePalX.Compilers
         private void CleanUp()
         {
             // give time for process to release file handles
+            Thread.Sleep(500);
             try
             {
                 if (File.Exists(mapcfg))

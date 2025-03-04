@@ -104,7 +104,7 @@ namespace CompilePalX
         public static event CompileFinished OnStart;
         public static event CompileFinished OnFinish;
 
-        public static TrulyObservableCollection<Map> MapFiles = new TrulyObservableCollection<Map>();
+        public static TrulyObservableCollection<Map> MapFiles = [];
 
         private static Stopwatch compileTimeStopwatch = new Stopwatch();
 
@@ -162,18 +162,19 @@ namespace CompilePalX
                     ConfigurationManager.CurrentPreset = map.Preset;
 
                     var compileErrors = new List<Error>();
-                    CompilePalLogger.LogLine($"Starting a '{ConfigurationManager.CurrentPreset?.Name}' compile.");
+                    CompilePalLogger.LogLine($"Starting a '{ConfigurationManager.CurrentPreset?.Name}' compile for {GameConfigurationManager.GameConfiguration.Name}.");
                     CompilePalLogger.LogLine($"Starting compilation of {cleanMapName}");
 
 					//Update the grid so we have the most up to date order
 	                OrderManager.UpdateOrder();
 
                     GameConfigurationManager.BackupCurrentContext();
+                    var buildContext = GameConfigurationManager.BuildContext(map);
 					foreach (var compileProcess in OrderManager.CurrentOrder)
 					{
                         cancellationToken.ThrowIfCancellationRequested();
                         currentCompileProcess = compileProcess;
-                        compileProcess.Run(GameConfigurationManager.BuildContext(map), cancellationToken);
+                        compileProcess.Run(buildContext, cancellationToken);
 
                         compileErrors.AddRange(currentCompileProcess.CompileErrors);
 
@@ -189,10 +190,14 @@ namespace CompilePalX
 
                         ProgressManager.Progress += (1d / ConfigurationManager.CompileProcesses.Count(c => c.Metadata.DoRun &&
                             c.PresetDictionary.ContainsKey(ConfigurationManager.CurrentPreset))) / MapFiles.Count;
+
+                        // log empty line to make a space inbetween compile step logs
+                        CompilePalLogger.LogLine();
                     }
 
                     mapErrors.Add(new MapErrors { MapName = cleanMapName, Errors = compileErrors });
-                    
+
+                    CompilePalLogger.LogLineFileLocation($"Compiled Map: {buildContext.CopyLocation}", buildContext.CopyLocation);
                     GameConfigurationManager.RestoreCurrentContext();
                 }
 
@@ -205,7 +210,7 @@ namespace CompilePalX
         private static void postCompile(List<MapErrors> errors)
         {
             CompilePalLogger.LogLineColor(
-	            $"\n'{ConfigurationManager.CurrentPreset!.Name}' compile finished in {compileTimeStopwatch.Elapsed.ToString(@"hh\:mm\:ss")}", (Brush) Application.Current.TryFindResource("CompilePal.Brushes.Success"));
+	            $"'{ConfigurationManager.CurrentPreset!.Name}' compile finished in {compileTimeStopwatch.Elapsed.ToString(@"hh\:mm\:ss")}", (Brush) Application.Current.TryFindResource("CompilePal.Brushes.Success"));
 
             if (errors != null && errors.Any())
             {

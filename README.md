@@ -21,7 +21,7 @@
 #### Experimental Releases
 Get the latest features without having to wait. Experimental releases may be unstable, use at your own risk.
 
-[Compile Pal V28-RC2](https://github.com/ruarai/CompilePal/releases/tag/v027.35)
+[Compile Pal V28.2](https://github.com/ruarai/CompilePal/releases/tag/v028.2)
 
 
 ## Features
@@ -43,6 +43,7 @@ Get the latest features without having to wait. Experimental releases may be uns
 * [Custom Compile Step Collection](Guides/CustomCollection.md)
 * [Command Line Arguments](Guides/CMDArgs.md)
 * [Registry Values](Guides/Registry.md)
+* [VScript Packing Hints](Guides/VScript.md)
 
 ## Contributing
 

@@ -24,8 +24,11 @@ namespace CompilePalX
 	    public bool Draggable = true; // set to false if we ever want to disable reordering non custom compile steps
         public List<Error> CompileErrors;
 
-        public CompileProcess(string name)
+        public CompileProcess(string name, string? parameterFolder = null)
         {
+            if (parameterFolder is not null)
+                this.ParameterFolder = parameterFolder;
+
             string jsonMetadata = Path.Combine(ParameterFolder, name, "meta.json");
 
             if (File.Exists(jsonMetadata))
@@ -55,8 +58,7 @@ namespace CompilePalX
 
             }
 
-            ParameterList = ConfigurationManager.GetParameters(Metadata.Name, Metadata.DoRun);
-
+            ParameterList = ConfigurationManager.GetParameters(Metadata.Name, Metadata.DoRun, this.ParameterFolder);
         }
 
         public static CompileMetadata LoadLegacyData(string csvFile)
@@ -139,8 +141,8 @@ namespace CompilePalX
             CompilePalLogger.LogLineColor("\nKilled {0}.", (Brush) Application.Current.TryFindResource("CompilePal.Brushes.Severity4"), this.Metadata.Name);
         }
 
-        public ObservableCollection<ConfigItem> ParameterList = new ObservableCollection<ConfigItem>();
-        public ObservableDictionary<Preset, ObservableCollection<ConfigItem>> PresetDictionary = new ObservableDictionary<Preset, ObservableCollection<ConfigItem>>();
+        public ObservableCollection<ConfigItem> ParameterList = [];
+        public ObservableDictionary<Preset, ObservableCollection<ConfigItem>> PresetDictionary = [];
 
 
         public string GetParameterString()
@@ -202,6 +204,7 @@ namespace CompilePalX
         public bool SupportsBSP { get; set; } = false;
         public HashSet<int>? IncompatibleGames { get; set; }
         public HashSet<int>? CompatibleGames { get; set; }
+        public string? WorkingDirectory { get; set; }
     }
 
     class CompileContext
