@@ -183,6 +183,8 @@ namespace CompilePalX.Compilers.BSPPack
         {
             // builds the list of textures applied to brushes
 
+            Regex patch_pattern = new Regex(@"^materials/maps/[^/]+/(.+)_wvt_patch.(vmt)$", RegexOptions.IgnoreCase);
+
             string mapname = bsp.Name.Split('\\').Last().Split('.')[0];
 
             TextureList = [];
@@ -194,6 +196,13 @@ namespace CompilePalX.Compilers.BSPPack
                     TextureList[i] = "materials" + TextureList[i] + ".vmt";
                 else
                     TextureList[i] = "materials/" + TextureList[i] + ".vmt";
+
+                // pack wvt (world vertex transition) patch materials. These are generated when blend textures are used on non displacement brushes and are renamed maps/{mapname}/{material_name}_wvt_patch.vmt
+                // https://github.com/ValveSoftware/source-sdk-2013/blob/a62efecf624923d3bacc67b8ee4b7f8a9855abfd/src/utils/vbsp/worldvertextransitionfixup.cpp#L47
+                if (patch_pattern.Match(TextureList[i]) is Match { Success: true} match)
+                {
+                    TextureList[i] = Path.Join("materials", $"{match.Groups[1].Value}.{match.Groups[2].Value}");
+                }
             }
 
             // find skybox materials
@@ -249,7 +258,16 @@ namespace CompilePalX.Compilers.BSPPack
 
                 // special condition for sprites
                 if (ent["classname"].Contains("sprite") && ent.ContainsKey("model"))
-                    materials.Add(ent["model"]);
+                {
+                    var model = ent["model"];
+                    // strip leading materials folder
+                    if(model.StartsWith("materials/", StringComparison.InvariantCultureIgnoreCase))
+                    {
+                        model = model.Substring(10);
+                    }
+                    materials.Add(model);
+                }
+                    
 
                 // special condition for item_teamflag
                 if (ent["classname"].Contains("item_teamflag"))
@@ -527,7 +545,7 @@ namespace CompilePalX.Compilers.BSPPack
             // find color correction files
             foreach (Dictionary<string, string> cc in entityList.Where(item => item["classname"].StartsWith("color_correction")))
                 if (cc.ContainsKey("filename"))
-                    TextureList.Add(cc["filename"]);
+                    MiscList.Add(cc["filename"]);
 
             // pack I/O referenced TF2 upgrade files
             // need to use array form of entity because multiple outputs with same command can't be stored in dict

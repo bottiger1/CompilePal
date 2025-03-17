@@ -378,18 +378,26 @@ namespace CompilePalX.Compilers.BSPPack
             var vtfList = new List<string>();
             using (var w = File.OpenRead(fullpath))
             {
-                KVObject kv = KVSerializer.Deserialize(w);
-                foreach (var property in kv)
+                KVObject kv;
+                try
                 {
-                    if (!Keys.vmtTextureKeyWords.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
-                        continue;
+                    kv = KVSerializer.Deserialize(w);
+                }
+                catch(Exception e)
+                {
+                    CompilePalLogger.LogCompileError($"Error parsing file {fullpath}", new Error(e.Message, ErrorSeverity.Error));
+                    return vtfList;
+                }
 
+                foreach (var property in FindKVKeys(kv, Keys.vmtTextureKeyWords))
+                {
                     var path = VmtPathParser(property.Value);
 
                     vtfList.Add($"materials/{path}.vtf");
                     if (property.Name.Equals("$envmap", StringComparison.OrdinalIgnoreCase))
                         vtfList.Add($"materials/{path}.hdr.vtf");
                 }
+
             }
             return vtfList;
         }
@@ -401,13 +409,9 @@ namespace CompilePalX.Compilers.BSPPack
             using (var w = File.OpenRead(fullpath))
             {
                 KVObject kv = KVSerializer.Deserialize(w);
-                foreach (var property in kv)
-                {
-                    if (!Keys.vmtMaterialKeyWords.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
-                        continue;
 
+                foreach (var property in FindKVKeys(kv, Keys.vmtMaterialKeyWords))
                     vmtList.Add($"materials/{VmtPathParser(property.Value)}.vmt");
-                }
             }
             return vmtList;
         }
@@ -791,6 +795,20 @@ namespace CompilePalX.Compilers.BSPPack
             }
             bsp.radardds = ddsfiles;
 
+            // cs:s radar materials
+            internalPath = $"materials/overviews/{Path.GetFileNameWithoutExtension(bsp.file.Name)}_radar.vmt";
+            foreach (string source in sourceDirectories)
+            {
+                string externalPath = source + "/" + internalPath;
+
+                if (File.Exists(externalPath))
+                {
+                    bsp.TextureList.Add(internalPath);
+                    break;
+                }
+            }
+
+
             // csgo kv file (.kv)
             internalPath = "maps/" + bsp.file.Name.Replace(".bsp", ".kv");
             foreach (string source in sourceDirectories)
@@ -946,10 +964,32 @@ namespace CompilePalX.Compilers.BSPPack
                 if (key.Equals(property.Name, StringComparison.OrdinalIgnoreCase))
                     values.Add(property.Value);
 
+                // recursively search KV
+                if (property.Value.ValueType == KVValueType.Collection)
+                    values.AddRange(FindKVKey(property, key));
+            }
+
+            return values;
+        }
+
+        /// <summary>
+        /// Recursively searches KV for specified keys, case insensitive
+        /// </summary>
+        /// <param name="kv"></param>
+        /// <param name="keys"></param>
+        /// <returns></returns>
+        private static List<KVObject> FindKVKeys(KVObject kv, List<string> keys)
+        {
+            var values = new List<KVObject>();
+
+            foreach (var property in kv)
+            {
+                if (keys.Contains(property.Name, StringComparer.OrdinalIgnoreCase))
+                    values.Add(property);
 
                 // recursively search KV
-                if (property is KVObject)
-                    values.AddRange(FindKVKey(property, key));
+                if (property.Value.ValueType == KVValueType.Collection)
+                    values.AddRange(FindKVKeys(property, keys));
             }
 
             return values;
